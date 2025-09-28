@@ -1,64 +1,58 @@
+mod audio_utils;
+mod image_utils;
+
 use anyhow::*;
 
-use core::f32;
-use std::{
-    io::Read,
-    path::{self, Path},
-    process::{Command, Stdio},
-};
+use rustfft::{FftPlanner, num_complex::Complex};
+use std::{path::Path, vec};
+
+use audio_utils::samples_from_file;
+use image_utils::save_rgb_image;
 
 fn main() -> anyhow::Result<()> {
     let path = Path::new("./audio/Mil_Horas.mp3");
-    let _samples = samples_from_file(&path, 44100, 16);
+
+    let sample_rate = 44100;
+
+    let samples = samples_from_file(&path, sample_rate, 16).unwrap();
+
+    //dbg!(samples.len() as f32 / sample_rate as f32);
+
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(sample_rate);
+
+    let mut buff = vec![Complex::default(); fft.get_inplace_scratch_len()];
+
+    let mut fft_vec: Vec<Vec<f32>> = Vec::new();
+
+    for second in samples.chunks(sample_rate) {
+        if second.len() < sample_rate {
+            break;
+        }
+
+        for (i, &x) in second.iter().enumerate() {
+            buff[i].re = x;
+            buff[i].im = 0.0;
+        }
+
+        fft.process(&mut buff);
+
+        // Magnitudes normalizadas
+        let magnitudes: Vec<f32> = buff.iter().map(|c| c.norm() / sample_rate as f32).collect();
+
+        fft_vec.push(magnitudes.clone());
+
+        // dbg!(magnitudes.len());
+
+        // dbg!(buff.len());
+
+        // break;
+    }
+
+    dbg!(fft_vec.len());
+
+    // let image_path = Path::new("./test.png");
+    // _ = save_rgb_image(image_path, fft_vec.len(), sample_rate, &f.unwrap();
 
     Ok(())
-}
-
-fn samples_from_file(path: &Path, sample_rate: u32, threads: u32) -> Result<Vec<f32>> {
-    dbg!(path, sample_rate, threads);
-
-    let mut buff = Vec::new();
-
-    let mut child = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-i",
-            path.to_str().unwrap(),
-            "-ac",
-            "1",
-            "-ar",
-            &sample_rate.to_string(),
-            "-f",
-            "f32le",
-            "-threads",
-            &threads.to_string(),
-            "-", // salida cruda por stdout
-        ])
-        .stdout(Stdio::piped())
-        .spawn()?;
-
-    let buff_len = child.stdout.take().unwrap().read_to_end(&mut buff)?;
-    let status = child.wait()?;
-
-    dbg!(buff_len);
-
-    if !status.success() {
-        bail!("ffmpeg fail {}", status.to_string());
-    }
-
-    if buff_len % 4 != 0 {
-        bail!("bytes len error {}", buff_len);
-    }
-
-    let mut output = Vec::with_capacity(buff_len / 4);
-
-    for chunk in buff.chunks_exact(4) {
-        let value = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        output.push(value);
-    }
-
-    Ok(output)
 }

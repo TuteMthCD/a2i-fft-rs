@@ -112,6 +112,11 @@ fn main() -> Result<()> {
     let fft = planner.plan_fft_forward(cfg.sample_rate);
 
     let mut freq_buffer = vec![Complex::default(); cfg.sample_rate];
+    // Use only the unique positive-frequency bins and drop the mirrored half.
+    let nyq = match freq_buffer.len() / 2 {
+        0 => freq_buffer.len(),
+        value => value,
+    };
 
     let mut seconds: Vec<Vec<f32>> = Vec::with_capacity(samples.len() / cfg.sample_rate);
 
@@ -130,7 +135,11 @@ fn main() -> Result<()> {
 
         fft.process(&mut freq_buffer);
 
-        let mags: Vec<f32> = freq_buffer.iter().map(|c| c.norm()).collect();
+        let mags: Vec<f32> = freq_buffer
+            .iter()
+            .take(nyq)
+            .map(|c| c.norm())
+            .collect();
 
         seconds.push(mags);
     }

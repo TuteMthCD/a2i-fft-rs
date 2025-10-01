@@ -179,11 +179,9 @@ fn main() -> Result<()> {
         for freqs in windows.iter() {
             for chunk in freqs.chunks(cfg.downsample) {
                 let avg = chunk.iter().copied().sum::<f32>() / chunk.len() as f32;
-                let mapped = avg
-                    .clamp(0.0, 1.0)
-                    .powf(0.2) // gamma curve to boost quieter bins
-                    * 255.0;
-                pix_buff.extend_from_slice(&[mapped as u8, mapped as u8, 0]);
+                let mapped = avg.clamp(0.0, 1.0).powf(0.2); // gamma curve to boost quieter bins
+                let [r, g, b] = spectrogram_color(mapped);
+                pix_buff.extend_from_slice(&[r, g, b]);
             }
         }
 
@@ -192,6 +190,39 @@ fn main() -> Result<()> {
 
     save_rgb_image(&cfg.output_path, width, height, pixels.as_slice())?;
     Ok(())
+}
+
+fn spectrogram_color(value: f32) -> [u8; 3] {
+    const PALETTE: [[u8; 3]; 5] = [
+        [6, 4, 38],      // deep navy
+        [16, 32, 130],   // indigo
+        [0, 116, 217],   // bright blue
+        [255, 136, 0],   // orange
+        [255, 221, 112], // soft yellow highlight
+    ];
+
+    let scaled = value.clamp(0.0, 1.0) * (PALETTE.len() as f32 - 1.0);
+    let idx = scaled.floor() as usize;
+
+    if idx >= PALETTE.len() - 1 {
+        return PALETTE[PALETTE.len() - 1];
+    }
+
+    let frac = scaled - idx as f32;
+    let start = PALETTE[idx];
+    let end = PALETTE[idx + 1];
+
+    let lerp = |a: u8, b: u8| -> u8 {
+        let a = a as f32;
+        let b = b as f32;
+        (a + (b - a) * frac).round() as u8
+    };
+
+    [
+        lerp(start[0], end[0]),
+        lerp(start[1], end[1]),
+        lerp(start[2], end[2]),
+    ]
 }
 
 #[cfg(test)]

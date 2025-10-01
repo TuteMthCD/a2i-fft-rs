@@ -32,3 +32,6 @@ El comando lee el archivo de entrada (`-i`) y genera una imagen PNG con el mapa 
 
 ## Notas
 - Si `ffmpeg` no está instalado, el programa fallará al intentar extraer los samples.
+
+### TODO!
+- hacer eje x en escala log

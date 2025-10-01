@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 /// Extracts mono 32-bit float samples from an audio file using ffmpeg.
 ///
@@ -19,23 +19,13 @@ pub fn samples_from_file(path: &Path, sample_rate: usize, threads: usize) -> Res
     }
 
     let mut child = Command::new("ffmpeg")
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-i",
-            path.to_str().unwrap(),
-            "-ac",
-            "1",
-            "-ar",
-            &sample_rate.to_string(),
-            "-f",
-            "f32le",
-            "-threads",
-            &threads.to_string(),
-            "-", // raw output via stdout
-        ])
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
+        .arg(path)
+        .args(["-ac", "1", "-ar"])
+        .arg(sample_rate.to_string())
+        .args(["-f", "f32le", "-threads"])
+        .arg(threads.to_string())
+        .arg("-") // raw output via stdout
         .stdout(Stdio::piped())
         .spawn()?;
 

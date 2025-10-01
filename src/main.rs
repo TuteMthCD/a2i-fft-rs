@@ -15,6 +15,7 @@ struct Config {
     output_path: PathBuf,
     sample_rate: usize,
     downsample: usize,
+    window_width: usize,
     jobs: usize,
 }
 
@@ -25,7 +26,8 @@ where
     let mut input_path: Option<PathBuf> = None;
     let mut output_path = PathBuf::from("./a.png");
     let mut sample_rate = 44_100usize;
-    let mut downsample = 128usize;
+    let mut downsample = 32usize;
+    let mut frame_size = 32usize;
     let mut jobs = 16usize;
 
     let mut args = args.into_iter();
@@ -60,6 +62,14 @@ where
                     .parse()
                     .context("--downsample / -d expects a positive integer")?;
             }
+            "-f" | "--frame-size-div" => {
+                let value = args
+                    .next()
+                    .context("missing value for --frame-size-div / -w option")?;
+                frame_size = value
+                    .parse()
+                    .context("--frame-size-div / -f expects a positive integer")?;
+            }
             "-j" | "--jobs" => {
                 let value = args
                     .next()
@@ -67,6 +77,9 @@ where
                 jobs = value
                     .parse()
                     .context("--jobs / -j expects a positive integer")?;
+            }
+            "-h" | "--helps" => {
+                todo!("help");
             }
             _other => {}
         }
@@ -91,6 +104,7 @@ where
         output_path,
         sample_rate,
         downsample,
+        window_width: frame_size,
         jobs,
     })
 }
@@ -108,26 +122,28 @@ fn main() -> Result<()> {
         );
     }
 
-    let mut planner = FftPlanner::<f32>::new();
-    let fft = planner.plan_fft_forward(cfg.sample_rate);
+    let window_width = cfg.sample_rate / cfg.window_width;
 
-    let mut freq_buffer = vec![Complex::default(); cfg.sample_rate];
+    let mut planner = FftPlanner::<f32>::new();
+    let fft = planner.plan_fft_forward(window_width);
+
+    let mut freq_buffer = vec![Complex::default(); window_width];
     // Use only the unique positive-frequency bins and drop the mirrored half.
     let nyq = match freq_buffer.len() / 2 {
         0 => freq_buffer.len(),
         value => value,
     };
 
-    let mut seconds: Vec<Vec<f32>> = Vec::with_capacity(samples.len() / cfg.sample_rate);
+    let mut windows: Vec<Vec<f32>> = Vec::with_capacity(samples.len() / window_width);
 
-    for second in samples.chunks(cfg.sample_rate) {
-        if second.len() < cfg.sample_rate {
+    for window in samples.chunks(window_width) {
+        if window.len() < window_width {
             break;
         }
 
         freq_buffer
             .iter_mut()
-            .zip(second.iter())
+            .zip(window.iter())
             .for_each(|(slot, &sample)| {
                 slot.re = sample;
                 slot.im = 0.0;
@@ -135,36 +151,32 @@ fn main() -> Result<()> {
 
         fft.process(&mut freq_buffer);
 
-        let mags: Vec<f32> = freq_buffer
-            .iter()
-            .take(nyq)
-            .map(|c| c.norm())
-            .collect();
+        let mags: Vec<f32> = freq_buffer.iter().take(nyq).map(|c| c.norm()).collect();
 
-        seconds.push(mags);
+        windows.push(mags);
     }
 
-    if seconds.is_empty() {
+    if windows.is_empty() {
         bail!("no complete seconds of audio could be processed");
     }
 
-    let max = seconds.iter().flatten().copied().fold(0.0f32, f32::max);
+    let max = windows.iter().flatten().copied().fold(0.0f32, f32::max);
 
     if max <= f32::EPSILON {
         bail!("audio signal has insufficient energy to create an image");
     }
 
-    for freqs in seconds.iter_mut() {
+    for freqs in windows.iter_mut() {
         freqs.iter_mut().for_each(|value| *value /= max);
     }
 
-    let width = ((seconds[0].len() + (cfg.downsample - 1)) / cfg.downsample) as u32;
-    let height = seconds.len() as u32;
+    let width = ((windows[0].len() + (cfg.downsample - 1)) / cfg.downsample) as u32;
+    let height = windows.len() as u32;
 
     let pixels: Vec<u8> = {
         let mut pix_buff = Vec::with_capacity(width as usize * height as usize * 3);
 
-        for freqs in seconds.iter() {
+        for freqs in windows.iter() {
             for chunk in freqs.chunks(cfg.downsample) {
                 let avg = chunk.iter().copied().sum::<f32>() / chunk.len() as f32;
                 let mapped = avg
